@@ -13,8 +13,14 @@ from scipy.optimize import minimize_scalar
 from scipy.ndimage import label, generate_binary_structure
 
 
+## Scadnano oddities to keep in mind
+# Crossover position is indicated by its topright offset position (of the four offset positions)
+
+
+
 #To-do
 #0. DONE - Fix staples being too short - merge short ones with adjacent staples? - Check if this is only on the perimeter?
+#0.5. Extremities too unstable - may be reinforce by having crossovers near edges and allow really short staples - OR truncate the scaffold to have edges only at crossover positions - might have to shift the whole design to optimize efficient boundaries
 #1. Optimize rasterization of face (max fraction of area covered among all the rotations may be?)
 #2. Scaffold routing through all faces - polyhedron net algorithm? Hamiltonian path of the dual
 # polyhedron of our input shape (in other words the face graph) is the answer but that's not always findable 
@@ -23,6 +29,7 @@ from scipy.ndimage import label, generate_binary_structure
 #applies a non-affine transformation to all adjacent faces - therefore probably need to make my own
 #polygon object preserving vertex, edge and face information (make sure no difference between face and facet
 #in this new object)
+#4. Alternate staple patter - staple crossovers where scaffold crossovers for the strand pair right above
 
 #print('h='+str(helix)+' o='+str(offset))
 
@@ -47,75 +54,78 @@ def posdiff (big,small): #Returns some huge number if small<big, since used in m
     else:
         return 1000000
 
+input_type = 'S'
 
-##Polygon input
-#------
+if input_type=='P':
 
-# r = np.array([35,10,35,60])
-# c = np.array([8, 50,30,50])
-# rp = np.append(r,r[0])
-# cp = np.append(c,c[0])
+    #Polygon input
+    #------
+    
+    r = np.array([35,10,35,60])
+    c = np.array([8, 50,25,50])
+    rp = np.append(r,r[0])
+    cp = np.append(c,c[0])
+    
+    mag = np.sqrt((scaflen/(2.0*block))/(1.05*PolyArea(r,c))) #adjusted so scaffold length in origami is shorter than scaflen
+    # mag = 0.3 #just a magnification factor
+    
+    print(mag)      
+    print((mag**2)*PolyArea(r,c))
+    
+    
+    rr, cc = polygon((mag*c), (mag*r))
+    rmax = np.max(rr)+2
+    cmax = np.max(cc)+2
+    maxhelix = 2*rmax-1
+    img = np.zeros((rmax, cmax), dtype=int)
+    img[rr, cc] = 1
+    img = img[::-1,:] #flip to match plot
+    # img[[10,11,12]][:,[21,22]] = [0]
+    print(strlen(img))
+    
+    # #Plot shape of design
+    # fig = plt.figure()
+    # plt.plot(rp,cp)
+    # # plt.axis('square')
+    # plt.axis('equal')
+    # plt.style.use('dark_background')
+    # plt.show()
+    
+    #---------
 
-# mag = np.sqrt((scaflen/(2.0*block))/(1.05*PolyArea(r,c))) #adjusted so scaffold length in origami is shorter than scaflen
-# # mag = 0.3 #just a magnification factor
+elif input_type=='S':
 
-# print(mag)      
-# print((mag**2)*PolyArea(r,c))
-
-
-# rr, cc = polygon((mag*c), (mag*r))
-# rmax = np.max(rr)+2
-# cmax = np.max(cc)+2
-# maxhelix = 2*rmax-1
-# img = np.zeros((rmax, cmax), dtype=int)
-# img[rr, cc] = 1
-# img = img[::-1,:] #flip to match plot
-# # img[[10,11,12]][:,[21,22]] = [0]
-# print(strlen(img))
-
-# #Plot shape of design
-# fig = plt.figure()
-# plt.plot(rp,cp)
-# # plt.axis('square')
-# plt.axis('equal')
-# plt.style.use('dark_background')
-# plt.show()
-
-#---------
-
-
-
-##SVG File input
-#------
-
-shape = trimesh.load(file_obj=r"C:\Users\Shubham\Desktop\bat1.svg", file_type='svg')
-
-#length difference between length of scaffold strand used and scaffold in origami
-#made from rasterization of svg image shape, with resolution reso
-def lendiff(reso): 
-    img = shape.rasterize(reso,(0,0))
+    ##SVG File input
+    #------
+    
+    shape = trimesh.load(file_obj=r"C:\Users\Shubham\Desktop\bat1.svg", file_type='svg')
+    
+    #length difference between length of scaffold strand used and scaffold in origami
+    #made from rasterization of svg image shape, with resolution reso
+    def lendiff(reso): 
+        img = shape.rasterize(reso,(0,0))
+        img = np.asarray(img)
+        return posdiff(scaflen, strlen(img))
+    maxres = minimize_scalar(lendiff,bounds=(0, 100), method='bounded')
+    
+    
+    img = shape.rasterize(maxres.x,(0,0))
+    
+    #Manual resolution setting
+    # img = shape.rasterize(20,(0,0))
+    
     img = np.asarray(img)
-    return posdiff(scaflen, strlen(img))
-maxres = minimize_scalar(lendiff,bounds=(0, 100), method='bounded')
-
-
-img = shape.rasterize(maxres.x,(0,0))
-
-#Manual resolution setting
-# img = shape.rasterize(20,(0,0))
-
-img = np.asarray(img)
-print(strlen(img))
-print(maxres.x)
-print(posdiff(scaflen, strlen(img)))
-
-maxhelix = 2*len(img) - 1
-cmax = len(img[0])+2
-img = np.insert(img, 0, values=False, axis=1)
-img = np.insert(img, 0, values=False, axis=0)
-plt.imshow(img)
-
-#---------
+    print(strlen(img))
+    print(maxres.x)
+    print(posdiff(scaflen, strlen(img)))
+    
+    maxhelix = 2*len(img) - 1
+    cmax = len(img[0])+2
+    img = np.insert(img, 0, values=False, axis=1)
+    img = np.insert(img, 0, values=False, axis=0)
+    # plt.imshow(img)
+    
+    #---------
 
 
 
@@ -155,25 +165,37 @@ def create_design():
     design.strands[0].set_scaffold()
     precursor_staples(design)
     add_staple_nicks(design)
+    # add_staple_nicks_LD(design)
+    add_deletions(design)
     return design
 
 def domain_end(design: sc.Design, helix, offset): #True if it is a domain end or if nothing exists
     if len(design.domains_at(helix, offset))==2:
         if design.domains_at(helix, offset)[0].start == offset or \
-           design.domains_at(helix, offset)[0].end == offset or \
+           design.domains_at(helix, offset)[0].end == offset+1 or \
            design.domains_at(helix, offset)[1].start == offset or \
-           design.domains_at(helix, offset)[1].end == offset :
+           design.domains_at(helix, offset)[1].end == offset+1 :
                return True
         else :
              return False
     elif len(design.domains_at(helix, offset))==1:
         if design.domains_at(helix, offset)[0].start == offset or \
-           design.domains_at(helix, offset)[0].end == offset : 
+           design.domains_at(helix, offset)[0].end == offset+1 : 
                return True
         else:
             return False
     else:
         return True #since we don't want crossovers where nothing exists
+
+
+def long_stap_cond(design, helix, offset): #check if nicking at offset will lead to staples with minimum length "gap"
+    gap = 4
+    if (design.domains_at(helix, offset-gap)) and \
+       (design.domains_at(helix, offset+gap)):
+        return True
+    else:
+        return False
+       
 
 def precursor_scaffolds() -> sc.Design:
     
@@ -215,8 +237,101 @@ def precursor_staples(design: sc.Design):
                         forward=((2*helix+1) % 2 == 1), start=start, end=end)]))
     for staple in staples:
             design.add_strand(staple)
-        
+
+
+def cross_conds(design, helix, offset): #conditions for making crossover at offset
+    if 0<=(offset)<=block*cmax and \
+       (design.domains_at(helix, offset-4)) and \
+       (design.domains_at(helix, offset+4)) and \
+       (design.domains_at(helix+1, offset)) and \
+       (design.domains_at(helix+1, offset-1)) and \
+       not domain_end(design, helix, offset) and \
+       not domain_end(design, helix+1, offset):  
+        return True
+    else :
+        return False
+
+
+
 def add_staple_nicks(design: sc.Design):
+    
+    crossovers = []
+    midgap = 3
+    state = 0
+    every = -1 #skip every xth crossover
+    
+    for helix in range(3, maxhelix, 2): 
+        if not design.strands_starting_on_helix(helix):
+            pass
+        else :
+            hel1 = helix #first starting helix
+            break
+    
+    for helix in range(hel1, maxhelix, 2):
+        
+        scafdom1 = design.strands_starting_on_helix(helix)
+        scafdom2 = design.strands_starting_on_helix(helix+1)
+        if not (scafdom1 and scafdom2): #check for empty helix at the end of the design
+            break
+  
+    for helix in range(maxhelix):
+                
+        if helix%2 == 0 :
+            for offset in range(block*cmax):
+
+                
+                if (((offset-3)%32==0) or \
+                      ((offset-3)%32==10) or \
+                      ((offset-3)%32==21)) and \
+                      (design.domains_at(helix, offset+midgap)):
+                         
+                    state = state+1 
+                    if not every==-1:
+                        if state%every == 0:
+                            # print(str(helix)+' '+str(offset))
+                            continue
+                    if domain_end(design, helix, offset+midgap) : #no nick if domain end
+                        continue
+                    #Prevent very short staples
+                    if long_stap_cond(design, helix, offset+midgap)==True:
+                        design.add_nick(helix=helix, offset=offset+midgap, forward=helix % 2 == 1)
+                    if cross_conds(design, helix, offset):              
+                        crossovers.append(sc.Crossover(helix=helix, helix2=helix + 1, \
+                                                    offset=offset, forward=helix % 2 == 1))
+                    elif helix==2:
+                        print("not here "+str(offset))
+
+        else :
+            for offset in range(block*cmax):
+                
+                if (((offset-8)%32==0) or \
+                      ((offset-8)%32==11) or \
+                      ((offset-8)%32==21)) and \
+                      (design.domains_at(helix, offset+midgap)):
+
+                    state = state+1 
+                    if not every==-1:
+                        if state%every == 0:
+                            # print(str(helix)+' '+str(offset))
+                            continue                         
+                    if domain_end(design, helix, offset+midgap) : #no nick if domain end
+                        continue
+                    # #Prevent very short staples
+                    # if long_stap_cond(design, helix, offset+midgap)==True:
+                    #     design.add_nick(helix=helix, offset=offset+midgap, forward=helix % 2 == 1)
+                   
+                    if cross_conds(design, helix, offset):              
+                        crossovers.append(sc.Crossover(helix=helix, helix2=helix + 1, \
+                                                    offset=offset, forward=helix % 2 == 1))
+
+        
+    design.add_crossovers(crossovers)
+
+
+
+
+        
+def add_staple_nicks_LD(design: sc.Design):
     
     crossovers = []
     
@@ -242,16 +357,16 @@ def add_staple_nicks(design: sc.Design):
                         continue
                     #Prevent very short staples
                     if (design.domains_at(helix, offset-16)) and \
-                       (design.domains_at(helix, offset+16)):
+                        (design.domains_at(helix, offset+16)):
                         design.add_nick(helix=helix, offset=offset, forward=helix % 2 == 1)
                     if 0<=(offset-8)<=block*cmax and \
-                       (design.domains_at(helix, offset-16)) and \
-                       (design.domains_at(helix, offset)) and \
-                       (design.domains_at(helix+1, offset-8)) and \
-                       (design.domains_at(helix+1, offset-9)) and \
-                       not domain_end(design, helix, offset-8):              
+                        (design.domains_at(helix, offset-16)) and \
+                        (design.domains_at(helix, offset)) and \
+                        (design.domains_at(helix+1, offset-8)) and \
+                        (design.domains_at(helix+1, offset-9)) and \
+                        not domain_end(design, helix, offset-8):              
                         crossovers.append(sc.Crossover(helix=helix, helix2=helix + 1, \
-                                                   offset=offset-8, forward=helix % 2 == 1))
+                                                    offset=offset-8, forward=helix % 2 == 1))
 
         else :
             for offset in range(block*cmax):
@@ -260,19 +375,22 @@ def add_staple_nicks(design: sc.Design):
                         continue
                     #Prevent very short staples
                     if (design.domains_at(helix, offset-16)) and \
-                       (design.domains_at(helix, offset+16)):
+                        (design.domains_at(helix, offset+16)):
                         design.add_nick(helix=helix, offset=offset, forward=helix % 2 == 1)
                     if 0<=(offset-8)<=block*cmax and \
-                       (design.domains_at(helix, offset-16)) and \
-                       (design.domains_at(helix, offset)) and \
-                       (design.domains_at(helix+1, offset-8)) and \
-                       (design.domains_at(helix+1, offset-9)) and \
-                       not domain_end(design, helix, offset-8):
+                        (design.domains_at(helix, offset-16)) and \
+                        (design.domains_at(helix, offset)) and \
+                        (design.domains_at(helix+1, offset-8)) and \
+                        (design.domains_at(helix+1, offset-9)) and \
+                        not domain_end(design, helix, offset-8):
                            
                         crossovers.append(sc.Crossover(helix=helix, helix2=helix + 1, \
-                                                   offset=offset-8, forward=helix % 2 == 1))
+                                                    offset=offset-8, forward=helix % 2 == 1))
 
     design.add_crossovers(crossovers)
+
+
+
 
 def add_scaffold_nicks(design: sc.Design):
     crossovers = []
@@ -363,8 +481,33 @@ def add_scaffold_crossovers(design: sc.Design):
 
     design.add_crossovers(crossovers)
 
+def add_deletions(design: sc.Design):
+    
+    for helix in range(3, maxhelix): 
+        if not design.strands_starting_on_helix(helix):
+            pass
+        else :
+            hel1 = helix #first starting helix
+            break
+    
+            
+    for helix in range(hel1, maxhelix, 2):
+        for offset in range(block*cmax):
+            if design.domains_at(helix, offset) and offset%48==0:
+                design.add_deletion(helix, offset)
+
 
 if __name__ == '__main__':
     design = create_design()
     design.write_scadnano_file()
     design.export_cadnano_v2()
+    
+    #Plot staple length distribution
+    strand_lengths = []
+    for strand in design.strands:
+        if not strand.dna_length() > 2000: 
+            strand_lengths.append(strand.dna_length())
+    hist = np.histogram(strand_lengths, bins=200, density=False)
+    plt.plot(hist[1][:-1], hist[0])
+    plt.style.use('dark_background')
+    plt.show()

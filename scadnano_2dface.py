@@ -8,6 +8,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from skimage.draw import polygon
 import scadnano as sc
+import trimesh
+from scipy.optimize import minimize_scalar
+from scipy.ndimage import label, generate_binary_structure
 
 
 #To-do
@@ -16,36 +19,104 @@ import scadnano as sc
 #2. Scaffold routing through all faces - polyhedron net algorithm? Hamiltonian path of the dual
 # polyhedron of our input shape (in other words the face graph) is the answer but that's not always findable 
 #- settle with brute force backtracking algo?
+#3. Modifying vertices (rotating faces to XY plane) in-place doesn't work, because flattening one face
+#applies a non-affine transformation to all adjacent faces - therefore probably need to make my own
+#polygon object preserving vertex, edge and face information (make sure no difference between face and facet
+#in this new object)
 
 #print('h='+str(helix)+' o='+str(offset))
-
-def PolyArea(x,y): 
-    return 0.5*np.abs(np.dot(x,np.roll(y,1))-np.dot(y,np.roll(x,1)))
-
 
 
 scaflen = 8064 #scaffold length to be used
 block = 14 #controls effective "pixel" width, height is fixed at 2 helices for now
 
-r = np.array([1,50,60,60])
-c = np.array([8, 50,24,1])
-rp = np.append(r,r[0])
-cp = np.append(c,c[0])
+def PolyArea(x,y): #Area of polygon coordinates given by x,y
+    return 0.5*np.abs(np.dot(x,np.roll(y,1))-np.dot(y,np.roll(x,1)))
 
-mag = np.sqrt((scaflen/(2.0*block))/(1.05*PolyArea(r,c))) #adjusted so scaffold length in origami is shorter than scaflen
-# mag = 0.3 #just a magnification factor
 
-print(mag)      
-print((mag**2)*PolyArea(r,c))
+def strlen (img): #Returns length of scaffold used in origami made from img (boolean image)
+    count = 0
+    for x in np.nditer(img):
+        if x == 1:
+            count+=1
+    return count*2*block
 
-rr, cc = polygon((mag*c), (mag*r))
-rmax = np.max(rr)+2
-cmax = np.max(cc)+2
-maxhelix = 2*rmax-1
-img = np.zeros((rmax, cmax), dtype=int)
-img[rr, cc] = 1
-img = img[::-1,:] #flip to match plot
-# img[[10,11,12]][:,[21,22]] = [0]
+def posdiff (big,small): #Returns some huge number if small<big, since used in minimization optimization
+    if big>=small:
+        return big-small
+    else:
+        return 1000000
+
+
+##Polygon input
+#------
+
+# r = np.array([35,10,35,60])
+# c = np.array([8, 50,30,50])
+# rp = np.append(r,r[0])
+# cp = np.append(c,c[0])
+
+# mag = np.sqrt((scaflen/(2.0*block))/(1.05*PolyArea(r,c))) #adjusted so scaffold length in origami is shorter than scaflen
+# # mag = 0.3 #just a magnification factor
+
+# print(mag)      
+# print((mag**2)*PolyArea(r,c))
+
+
+# rr, cc = polygon((mag*c), (mag*r))
+# rmax = np.max(rr)+2
+# cmax = np.max(cc)+2
+# maxhelix = 2*rmax-1
+# img = np.zeros((rmax, cmax), dtype=int)
+# img[rr, cc] = 1
+# img = img[::-1,:] #flip to match plot
+# # img[[10,11,12]][:,[21,22]] = [0]
+# print(strlen(img))
+
+# #Plot shape of design
+# fig = plt.figure()
+# plt.plot(rp,cp)
+# # plt.axis('square')
+# plt.axis('equal')
+# plt.style.use('dark_background')
+# plt.show()
+
+#---------
+
+
+
+##SVG File input
+#------
+
+shape = trimesh.load(file_obj=r"C:\Users\Shubham\Desktop\bat1.svg", file_type='svg')
+
+#length difference between length of scaffold strand used and scaffold in origami
+#made from rasterization of svg image shape, with resolution reso
+def lendiff(reso): 
+    img = shape.rasterize(reso,(0,0))
+    img = np.asarray(img)
+    return posdiff(scaflen, strlen(img))
+maxres = minimize_scalar(lendiff,bounds=(0, 100), method='bounded')
+
+
+img = shape.rasterize(maxres.x,(0,0))
+
+#Manual resolution setting
+# img = shape.rasterize(20,(0,0))
+
+img = np.asarray(img)
+print(strlen(img))
+print(maxres.x)
+print(posdiff(scaflen, strlen(img)))
+
+maxhelix = 2*len(img) - 1
+cmax = len(img[0])+2
+img = np.insert(img, 0, values=False, axis=1)
+img = np.insert(img, 0, values=False, axis=0)
+plt.imshow(img)
+
+#---------
+
 
 
 #deal with 4-disconnected cells
@@ -68,25 +139,13 @@ for index, value in np.ndenumerate(img):
        img[x,y+1] :
          img[index] = 1
          img[x+1,y+1] = 1
-         
-
-#To check actual scaffold length
-count = 0
-for x in np.nditer(img):
-    if x == 1:
-        count+=1
-print(count)
-print(count*2*block)
-
-#Plot shape of design
-fig = plt.figure()
-plt.plot(rp,cp)
-# plt.axis('square')
-plt.axis('equal')
-plt.style.use('dark_background')
-plt.show()
 
 
+#Want to detect disconnected background regions since otherwise holes are not detected
+im_inv = 1-img 
+labeled_array, num_features = label(im_inv)
+if num_features != 1:
+    raise Exception("Non-contiguous regions in image!")
 
 
 def create_design():
@@ -238,9 +297,11 @@ def add_scaffold_nicks(design: sc.Design):
             interstarts = []
             interends = []
             for dom in range(1, len(img[imghelix])):
-                if (bool(img[imghelix][dom] and img[imghelix+1][dom])) and (not bool(img[imghelix][dom-1] and img[imghelix+1][dom-1])):
+                if (bool(img[imghelix][dom] and img[imghelix+1][dom])) and \
+                   (not bool(img[imghelix][dom-1] and img[imghelix+1][dom-1])):
                     interstarts.append(dom)
-                if (not bool(img[imghelix][dom] and img[imghelix+1][dom])) and (bool(img[imghelix][dom-1] and img[imghelix+1][dom-1])):
+                if (not bool(img[imghelix][dom] and img[imghelix+1][dom])) and \
+                   (bool(img[imghelix][dom-1] and img[imghelix+1][dom-1])):
                     interends.append(dom)
             
             interstarts = [x*block for x in interstarts]
