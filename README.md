@@ -1,4 +1,4 @@
-README
+# DNA Origami arbitrary shape generator
 
 Custom Script for automating creation of arbitrary 2D DNA origami designs.
 
